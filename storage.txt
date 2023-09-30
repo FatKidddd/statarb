@@ -1,0 +1,19 @@
+
+
+	# num_testing_shape = pf.testing_df.shape[0]
+	
+	# final_margin, final_fees = np.zeros(num_testing_shape+1), np.zeros((num_testing_shape+1, 3))
+	
+	# for stock_pair in test_backtest_results:
+	# 	position, margin, fees = test_backtest_results[stock_pair]
+	# 	final_margin += np.array(margin)
+	# 	final_fees += np.array(fees)
+	
+	# final_fees = np.cumsum(final_fees, axis=0)
+
+
+	# # cagr = (final_margin[-1] / initial_capital) ** (252 * 6 / num_testing_shape) - 1
+	# # sharpe = 
+
+	# display(f'Total PnL: {final_margin[-1] - final_margin[0]}')
+	# display(f'Total Fees: {np.sum(final_fees[-1])} = {final_fees[-1][0]} commission + {final_fees[-1][1]} slippage + {final_fees[-1][2]} short rental')
