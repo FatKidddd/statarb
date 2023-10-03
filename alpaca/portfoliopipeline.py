@@ -3,7 +3,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import gridspec
 
-from hurst import compute_Hc
 from pykalman import KalmanFilter
 from scipy.optimize import minimize
 from statsmodels.tsa.vector_ar.vecm import VECM
