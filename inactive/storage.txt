@@ -1,3 +1,126 @@
+try:
+	from datapipeline import DataPipeline
+	from clusterpipeline import ClusterPipeline
+	from portfoliopipeline import PortfolioPipeline
+	from backtestpipeline import BacktestPipeline
+except:
+	pass
+
+sectors_dict = {
+	'final': ['DBCN UX9SXI5CAPNP', 'HEWG VNTW0AC8LAHX', 'GSJY W8L8B8ZCNXB9', 'ITF S96RH23DIAUD', 'EFO UD63CSAA26P1', 'UPV UM61FJMT8EHX', 'EFU TX34HT712KBP',  'EPV UDJVM3EN4QXX', 'DGZ U0K69ONGSDPH', 'DZZ U0J6TLAAPMJP'] #, 'GLL U85WJOCE24BP']
+}
+
+total_pairs_found = 0
+total_pairs_validated = 0
+final_results = pd.DataFrame({ 'Stock1': [], 'Stock2': [], 'Beta': [], 'p': [], 'H': [], 'Half-life': [], 'Avg zero cross period': [], 'Cluster': [] })
+
+for sector in sectors_dict:
+	display(f'Doing {sector} sector now')
+
+
+	data_pipe = DataPipeline(sectors_dict[sector], (2018, 1, 1), (2020, 1, 1), (2022, 1, 1), (2023, 1, 1))
+	cluster_pipe = ClusterPipeline() 
+	portfolio_pipe = PortfolioPipeline()
+	backtest_pipe = BacktestPipeline()
+
+
+	training_df, validation_df, testing_df, training_and_validation_df = data_pipe.preprocess_and_split_data()
+
+	clusters = [training_df.columns] if training_df.shape[1] < 15 else cluster_pipe.find_clusters(training_df)
+
+
+	# get pairs for validation test
+	validation_pairs = portfolio_pipe.find_pairs_from_clusters(training_df, clusters)
+	if validation_pairs is None or validation_pairs.shape[0] == 0:
+		display(f'No validated pairs in {sector} sector')
+		continue
+
+	total_pairs_found += validation_pairs.shape[0]
+
+	initial_capital = 5000
+
+	# validation backtest
+	validation_backtest_results = backtest_pipe.validation_backtest(training_df, validation_df, validation_pairs, initial_capital=initial_capital)
+	
+	for pair_key in validation_backtest_results:
+		backtest_pipe.plot_backtest_results(validation_backtest_results, pair_key)
+
+
+
+	# filter results
+	filtered_validation_backtest_results = {}
+
+	for pair_key in validation_backtest_results:
+		margin = validation_backtest_results[pair_key]['margin']
+		if (margin[-1]-margin[0])/margin[0] >= 0.1:
+			filtered_validation_backtest_results[pair_key] = validation_backtest_results[pair_key]
+
+	num_successful = len(filtered_validation_backtest_results)
+	num_total = len(validation_backtest_results)
+	self._log(f'Sector {sector}: {num_successful}/{num_total} = {num_successful/num_total*100:.2f}% have +PnL')
+	self._log(filtered_validation_backtest_results)
+
+	if len(filtered_validation_pairs) == 0:
+		display(f'No positive validated pairs in {sector} sector')
+		continue
+
+	total_pairs_validated += num_successful
+
+
+
+	# get final test pairs
+	test_pairs = portfolio_pipe.revalidate_pairs(training_and_validation_df, filtered_validation_pairs)
+
+
+
+	# test backtest
+	test_backtest_results = backtest_pipe.test_backtest(training_and_validation_df, testing_df, test_pairs, initial_capital=initial_capital)
+
+
+	final_results = pd.concat([final_results, test_pairs], ignore_index=True)
+
+display(final_results)
+display(f'Final result for all sectors: Total pairs validated / total pairs found = {total_pairs_validated}/{total_pairs_found} = {total_pairs_validated/total_pairs_found*100:.2f}% pairs ')
+
+
+
+
+
+
+
+	# # remove outlier data points
+	# self.remove_outlier_data(limit, max_return_threshold)
+
+	# filter out non moving stocks this would actually add survivorship bias right?
+	# self.filter_non_moving(max_non_moving_threshold)
+
+	def remove_outlier_data(self, limit, max_return_threshold):
+		outlier_returns = self.df.pct_change().abs() > max_return_threshold
+		summed_outlier_returns = outlier_returns.sum()
+		self._log('Outlier data')
+		self._log(summed_outlier_returns[summed_outlier_returns > 0])
+	
+		self.df[outlier_returns] = np.nan # remove outlier data
+		self._ffill_and_dropna(self.df, limit=limit) # removed discontinued etfs whose data is ffill
+
+	def filter_non_moving(self, max_non_moving_threshold):
+		def consec_repeat_starts(a, n):
+			N = n-1
+			m = a[:-1]==a[1:]
+			return np.flatnonzero(np.convolve(m,np.ones(N, dtype=int))==N)-N+1	
+		
+		valid_columns = []
+		invalid_columns = []
+		for col in self.df.columns:
+			if len(consec_repeat_starts(self.df[col].values, max_non_moving_threshold)) == 0:
+				valid_columns.append(col)
+			else:
+				invalid_columns.append(col)
+
+		self._log(f'Invalid non moving columns {invalid_columns}')
+		self.df = self.df.loc[:, valid_columns]
+
+
 
 
 	# num_testing_shape = pf.testing_df.shape[0]
