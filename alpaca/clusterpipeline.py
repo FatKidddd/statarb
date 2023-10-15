@@ -7,15 +7,16 @@ from sklearn.decomposition import PCA
 from utils import display_side_by_side, ffill_and_dropna
 
 class ClusterPipeline():
-	def __init__(self, pca_factors=15, min_samples=3):
+	def __init__(self, pca_factors=15, min_samples=3, xi=0.05):
 		self.pca_factors = pca_factors
 		self.min_samples = min_samples
+		self.xi = xi
 
 	def find_clusters(self, df):
 		R = df.pct_change().iloc[1:, :] # here the columns of R are the different observations.
-		assert len(ffill_and_dropna(R, 7)) == 0 # avoid any stocks with missing returns
+		R, dropped = ffill_and_dropna(R, 7) # avoid any stocks with missing returns
 		norm_R = (R - R.mean()) / R.std()
-		assert len(ffill_and_dropna(norm_R, 7)) == 0 # avoid any stocks with missing returns
+		norm_R, dropped = ffill_and_dropna(norm_R, 7) # avoid any stocks with missing returns
 
 		pca = PCA()
 		pca.fit(norm_R.T) # use returns as columns and stocks as rows
@@ -26,14 +27,14 @@ class ClusterPipeline():
 
 		display(f'{np.sum(pca.explained_variance_ratio_[:self.pca_factors] * 100)}% of variance - {self.pca_factors} components')
 
-		optics_model = OPTICS(min_samples=self.min_samples)
+		optics_model = OPTICS(min_samples=self.min_samples, xi=self.xi)
 		# min_samples parameter -> min number of samples required to form a dense region
 		# xi parameter -> max distance between two samples to be considered as a neighborhood
 		# min_cluster_size -> min size of a dense region to be considered as a cluster
 
 		clustering = optics_model.fit(X)
 		clusters = []
-		for i in range(len(set(optics_model.labels_))-1):
+		for i in range(max(1, len(set(optics_model.labels_))-1)):
 			cluster = list(X[optics_model.labels_==i].index)
 			clusters.append(cluster)
 

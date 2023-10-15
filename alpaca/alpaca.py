@@ -90,12 +90,15 @@ async def get_historic_quotes(symbols, start, end, timeframe: TimeFrame):
 
 
 async def main(symbols):
-  start = pd.Timestamp(f'2018-01-01', tz=NY).date().isoformat()
+  # start = pd.Timestamp(f'2018-01-01', tz=NY).date().isoformat()
+  # end = pd.Timestamp(f'2022-12-31', tz=NY).date().isoformat()
+  # timeframe: TimeFrame = TimeFrame.Hour
+  start = pd.Timestamp(f'2016-01-01', tz=NY).date().isoformat()
   end = pd.Timestamp(f'2022-12-31', tz=NY).date().isoformat()
-  timeframe: TimeFrame = TimeFrame.Hour
-  await get_historic_bars(symbols, start, end, timeframe)
+  timeframe: TimeFrame = TimeFrame.Day
+  # await get_historic_bars(symbols, start, end, timeframe)
   # await get_historic_trades(symbols, start, end, timeframe)
-  # await get_historic_quotes(symbols, start, end, timeframe)
+  await get_historic_quotes(symbols, start, end, timeframe)
 
 
 if __name__ == '__main__':

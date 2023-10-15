@@ -59,16 +59,16 @@ def display_side_by_side(self, df_list, caption=''):
 	except:
 		pass
 
-def ffill_and_dropna(df, limit=None, thresh=0):
+def ffill_and_dropna(df, limit=None):
   # returns na columns
   old_num_cols = df.shape[1]
-  df.fillna(method='ffill', inplace=True, limit=limit)
+  ffilled_df = df.fillna(method='ffill', limit=limit)
 
-  na_columns = df.columns[df.isna().any()]
-  df.dropna(axis='columns', inplace=True, thresh=thresh)
+  na_columns = ffilled_df.columns[ffilled_df.isna().any()]
+  res_df = ffilled_df.dropna(axis='columns')
 
-  display(f'{old_num_cols} to {df.shape[1]} columns - {old_num_cols - df.shape[1]} NA columns dropped')
+  display(f'{old_num_cols} to {res_df.shape[1]} columns - {old_num_cols - res_df.shape[1]} NA columns dropped')
   display(f'Dropped {na_columns.to_list()} columns')
 
-  return na_columns
+  return res_df, na_columns
 

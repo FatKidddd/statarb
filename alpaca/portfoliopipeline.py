@@ -2,10 +2,11 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import gridspec
+from statsmodels.api import OLS
+from statsmodels.tsa.stattools import adfuller
+import statsmodels.api as sm
+from hurst import compute_Hc
 
-from pykalman import KalmanFilter
-from scipy.optimize import minimize
-from statsmodels.tsa.vector_ar.vecm import VECM
 
 class PortfolioPipeline():
 	def __init__(self, p_value_threshold=0.01, max_half_life=60):
@@ -13,6 +14,45 @@ class PortfolioPipeline():
 		self.p_value_threshold = p_value_threshold
 		self.min_half_life, self.max_half_life = 0, max_half_life # I want 1 week half life
 		self.avg_cross_period_threshold = int(self.max_half_life * 0.75) # i'll just make it less strict for now
+
+	def estimate_long_run_short_run_relationships(self, y, x):
+		assert isinstance(y, pd.Series), 'Input series y should be of type pd.Series'
+		assert isinstance(x, pd.Series), 'Input series x should be of type pd.Series'
+		assert sum(y.isnull()) == 0, 'Input series y has nan-values. Unhandled case.'
+		assert sum(x.isnull()) == 0, 'Input series x has nan-values. Unhandled case.'
+		assert y.index.equals(x.index), 'The two input series y and x do not have the same index.'
+		
+		x = sm.add_constant(x)
+		long_run_ols = sm.OLS(y, x)
+		long_run_ols_fit = long_run_ols.fit()
+		
+		c, gamma = long_run_ols_fit.params
+		z = long_run_ols_fit.resid
+
+		short_run_ols = OLS(y.diff().iloc[1:], (z.shift().iloc[1:]))
+		short_run_ols_fit = short_run_ols.fit()
+		
+		alpha = short_run_ols_fit.params[0]
+				
+		return c, gamma, alpha, z
+
+	def engle_granger_two_step_cointegration_test(self, y, x):
+		assert isinstance(y, pd.Series), 'Input series y should be of type pd.Series'
+		assert isinstance(x, pd.Series), 'Input series x should be of type pd.Series'
+		assert sum(y.isnull()) == 0, 'Input series y has nan-values. Unhandled case.'
+		assert sum(x.isnull()) == 0, 'Input series x has nan-values. Unhandled case.'
+		assert y.index.equals(x.index), 'The two input series y and x do not have the same index.'
+		
+		c, gamma, alpha, z = self.estimate_long_run_short_run_relationships(y, x)
+		
+		# NOTE: The p-value returned by the adfuller function assumes we do not estimate z first, but test 
+		# stationarity of an unestimated series directly. This assumption should have limited effect for high N, 
+		# so for the purposes of this course this p-value can be used for the EG-test. Critical values taking 
+		# this into account more accurately are provided in e.g. McKinnon (1990) and Engle & Yoo (1987).
+		
+		adfstat, pvalue, usedlag, nobs, crit_values = adfuller(z, maxlag=1, autolag=None)
+	
+		return c, gamma, alpha, z, adfstat, pvalue
 
 	def stationarity_check(self, price_series1, price_series2):
 		constant, beta, alpha, residual, adfstat, p_value = self.engle_granger_two_step_cointegration_test(price_series1, price_series2)
@@ -97,4 +137,3 @@ class PortfolioPipeline():
 		display(pairs)
 
 		return pairs
-

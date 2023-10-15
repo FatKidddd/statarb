@@ -25,8 +25,8 @@ class BacktestPipeline():
 	def validation_backtest(self, training_df, validation_df, pairs, initial_capital=1000):
 		validation_backtest_results = { stock1+'-'+stock2: {} for stock1, stock2 in pairs[['Stock1', 'Stock2']].values }
 
-		for entry_z_threshold in np.linspace(1.0, 2.5, 5):
-			for exit_z_threshold in np.linspace(0.0, 1.0, 4):
+		for entry_z_threshold in np.linspace(1.0, 2.5, 6):
+			for exit_z_threshold in np.linspace(0.0, 1.0, 3):
 				for stock1, stock2, beta, p, H, half_life, avg_cross_period in pairs.values:
 					# display(f'Simulating pair [{stock1}-{stock2}]')
 					training_pair_df, pair_df = self.prepare_training_and_testing_df(training_df, validation_df, stock1, stock2, beta)
@@ -81,10 +81,10 @@ class BacktestPipeline():
 		margin = [capital]
 		fees = [(0, 0, 0)]
 
+		prev_z_spread = 0 # this is to enforce use of lagging signal
 		for time, data_at_time in pair_df.iterrows():
 			stock1_close = data_at_time[stock1]
 			stock2_close = data_at_time[stock2]
-			cur_z_spread = data_at_time['z']
 
 			position_direction = np.sign(position[stock1][-1])
 
@@ -93,7 +93,7 @@ class BacktestPipeline():
 
 			usable_capital = capital * (1-self.percent_margin_buffer)
 			if position_direction == 0:
-				if (cur_z_spread <= -entry_z_threshold or cur_z_spread >= entry_z_threshold):
+				if (prev_z_spread <= -entry_z_threshold or prev_z_spread >= entry_z_threshold):
 					# adding the / 2 to avoid margin calls??? im p sure this isnt right tho
 					if beta > 1:
 						stock2_shares = min(np.floor(usable_capital / stock2_close / 2), np.floor(usable_capital / stock1_close * beta / 2))
@@ -105,14 +105,15 @@ class BacktestPipeline():
 					assert stock1_shares > 0
 					assert stock2_shares > 0
 						
-					is_long = cur_z_spread <= -entry_z_threshold
+					is_long = prev_z_spread <= -entry_z_threshold
 
 					position[stock1].append(stock1_shares if is_long else -stock1_shares)
 					position[stock2].append(-stock2_shares if is_long else stock2_shares)
 					pos_stock1, pos_stock2 = position[stock1][-1], position[stock2][-1]
 
 					portfolio_value = pos_stock1 * stock1_close + pos_stock2 * stock2_close
-					commission = 0.0008 * (abs(pos_stock1) * stock1_close + abs(pos_stock2) * stock2_close)
+					commission = max(0.005 * (abs(pos_stock1) + abs(pos_stock2)), \
+						0.0008 * (abs(pos_stock1) * stock1_close + abs(pos_stock2) * stock2_close))
 					slippage = 0.0020 * (abs(pos_stock1) * stock1_close + abs(pos_stock2) * stock2_close)
 					capital -= slippage + commission
 					capital -= portfolio_value
@@ -123,10 +124,11 @@ class BacktestPipeline():
 			else:
 				short_rental = -position[stock2][-1] * stock2_close * 0.01/252 if position_direction > 0 else -position[stock1][-1] * stock1_close * 0.01/252
 				capital -= short_rental
-				if ((position_direction > 0 and cur_z_spread >= exit_z_threshold) or (position_direction < 0 and cur_z_spread <= -exit_z_threshold)):
+				if ((position_direction > 0 and prev_z_spread >= exit_z_threshold) or (position_direction < 0 and prev_z_spread <= -exit_z_threshold)):
 					pos_stock1, pos_stock2 = position[stock1][-1], position[stock2][-1]
 					portfolio_value = pos_stock1 * stock1_close + pos_stock2 * stock2_close
-					commission = 0.0008 * (abs(pos_stock1) * stock1_close + abs(pos_stock2) * stock2_close)
+					commission = max(0.005 * (abs(pos_stock1) + abs(pos_stock2)), \
+						0.0008 * (abs(pos_stock1) * stock1_close + abs(pos_stock2) * stock2_close))
 					slippage = 0.0020 * (abs(pos_stock1) * stock1_close + abs(pos_stock2) * stock2_close)
 					capital -= commission + slippage
 					capital += portfolio_value
@@ -141,6 +143,8 @@ class BacktestPipeline():
 			portfolio_value = pos_stock1 * stock1_close + pos_stock2 * stock2_close
 			margin.append(capital + portfolio_value) # store margin if liquidated everything at point in time
 			fees.append((commission, slippage, short_rental))
+
+			prev_z_spread = data_at_time['z']
 
 		return position, fees, margin
 

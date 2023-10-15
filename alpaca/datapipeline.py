@@ -11,9 +11,10 @@ from utils import ffill_and_dropna
 # ok for now, because i'm just trying to implement the strategy first, then i'll try with quantconnnect's data
 class AlpacaUtils:
 	def get_data(self, tickers, start_date, end_date, resolution):
-		display('Is resolution and start and end date as pulled data agreeable?')
-
-		directory = './alpaca_data/bars/day'
+		# excludes end date
+		# self._display('Is resolution and start and end date as pulled data agreeable?')
+		folder_resolution = 'day' if resolution == 'D' else 'hour'
+		directory = './alpaca_data/bars/' + folder_resolution
 		close_df, volume_df = pd.DataFrame({}), pd.DataFrame({})
 		tickers_set = set(tickers)
 		max_n1, max_n2 = 0, 0
@@ -39,8 +40,10 @@ class AlpacaUtils:
 		assert max_n1 == close_df.shape[0]
 		assert max_n2 == volume_df.shape[0]
 		
-		display(f'Wanted {len(tickers)} tickers but got {close_df.shape[1]} tickers')
-		display(close_df)
+		self._display(f'Wanted {len(tickers)} tickers but got {close_df.shape[1]} tickers')
+		# self._display(close_df)
+		close_df = close_df.loc[(close_df.index >= start_date) & (close_df.index < end_date)]
+		volume_df = volume_df.loc[(volume_df.index >= start_date) & (volume_df.index < end_date)]
 
 		return close_df, volume_df
 
@@ -48,19 +51,23 @@ class AlpacaUtils:
 class DataPipeline(AlpacaUtils):
 	def __init__(self, tickers, start_date, validation_start_date, testing_start_date, end_date, resolution='D'):
 		self.start_date = datetime.datetime(*start_date).date()
-		self.end_date = datetime.datetime(*end_date).date()
 		self.validation_start_date = datetime.datetime(*validation_start_date).date()
 		self.testing_start_date = datetime.datetime(*testing_start_date).date()
+		self.end_date = datetime.datetime(*end_date).date()
 		self.resolution = resolution
 		self.original_tickers = tickers
 
+		self.debug = True
+
 		self.df, self.volume_df = self.get_data(self.original_tickers, self.start_date, self.end_date, self.resolution) # close price
 
-	def preprocess_and_split_data(self, min_avg_volume=10000, min_avg_price=5, limit=7, percent=0.8):
+	def _display(self, *args):
+		if self.debug:
+			display(*args)
+
+	def preprocess_and_split_data(self, min_avg_volume=10000, min_avg_price=5, limit=50, percent=0.9):
+		###### DO PROCESSING ######
 		self.raw_training_df = self.df.loc[self.df.index < self.validation_start_date]
-		self.validation_df = self.df.loc[(self.df.index >= self.validation_start_date) & (self.df.index < self.testing_start_date)]
-		self.testing_df = self.df.loc[self.df.index >= self.testing_start_date]
-		self.training_and_validation_df = self.df.loc[self.df.index < self.testing_start_date]
 
 		self.raw_training_volume_df = self.volume_df.loc[self.volume_df.index < self.validation_start_date]
 
@@ -71,27 +78,48 @@ class DataPipeline(AlpacaUtils):
 		# don't need to remove ffilled data unless want to remove in raw training df / validation df later on before getting test pairs
 
 		# filter by volume and price
-		display('##### Filtering #####')
-		filtered_by_volume = self.raw_training_df.loc[:, self.raw_training_volume_df.mean() > min_avg_volume]
-		filtered_by_price = filtered_by_volume.loc[:, self.raw_training_df.mean() > min_avg_price]
+		self._display('##### Filtering #####')
+		volume_passed_idx = self.raw_training_volume_df.mean() > min_avg_volume
+		volume_failed_cols = self.raw_training_volume_df.columns[~volume_passed_idx]
+		self._display(f'Failed volume columns {volume_failed_cols}')
 
-		display('##### Coordinating #####')
+		price_passed_idx = self.raw_training_df.mean() > min_avg_price
+		price_failed_cols = self.raw_training_df.columns[~price_passed_idx]
+		self._display(f'Failed price columns {price_failed_cols}')
+
+		self.training_df = self.raw_training_df.loc[:, (volume_passed_idx & price_passed_idx)]
+		
+		self._display('##### Coordinating #####')
 		# coordinate start timings for training data
-		self.training_df = self.coordinate_start_timings(filtered_by_price.copy(), limit, percent) 
+		self.training_df = self.coordinate_start_timings(self.training_df, limit, percent) 
 
-		display(f'{len(self.original_tickers)} original tickers to {self.training_df.shape[1]} tickers')
-		display(f'{self.training_df.shape[0]} + {self.validation_df.shape[0]} + {self.testing_df.shape[0]}') 
+		###### FINISH PROCESSING ######
+
+		self.validation_df = self.df.loc[(self.df.index >= self.validation_start_date) & (self.df.index < self.testing_start_date), self.training_df.columns]
+		self.testing_df = self.df.loc[self.df.index >= self.testing_start_date, self.training_df.columns]
+		self.training_and_validation_df = self.df.loc[(self.df.index >= self.training_df.index[0]) & (self.df.index < self.testing_start_date), self.training_df.columns]
+
+		self._display(f'{len(self.original_tickers)} original tickers to {self.training_df.shape[1]} tickers')
+		self._display(f'{self.training_df.shape[0]} + {self.validation_df.shape[0]} + {self.testing_df.shape[0]}') 
 
 		return self.training_df, self.validation_df, self.testing_df, self.training_and_validation_df
 
 	def coordinate_start_timings(self, df, limit, percent):
 		# need to coordinate start timings for etfs because some were created later
-		display(df.shape)
+		self._display(df.shape)
 		old_num_rows = df.shape[0]
-		dropped_na_columns = ffill_and_dropna(df, limit=limit, thresh=int(percent*old_num_rows)) 
 
-		idx_to_start = df.notnull().all(axis=1).argmax() # first common non na value
+		# ffill gaps with limit
+		ffilled_df = df.fillna(method='ffill', limit=limit)
 
-		display(f'Df new start date {df.index[idx_to_start]}, removed first {idx_to_start} or {idx_to_start/old_num_rows*100:.2f}% rows')
+		# remove columns with na data past percent from start
+		df_to_observe = ffilled_df.iloc[int((1-percent)*old_num_rows):, :]
+		na_columns = df_to_observe.columns[df_to_observe.isna().any()]
+		dropped_df = ffilled_df.drop(na_columns, axis=1)
 
-		return df.iloc[idx_to_start:]
+		# start from first common non na value
+		idx_to_start = dropped_df.notnull().all(axis=1).argmax()
+
+		self._display(f'Df new start date {dropped_df.index[idx_to_start]}, removed first {idx_to_start} or {idx_to_start/old_num_rows*100:.2f}% rows')
+
+		return dropped_df.iloc[idx_to_start:]
